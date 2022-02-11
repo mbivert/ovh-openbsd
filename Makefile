@@ -1,0 +1,3 @@
+rdsetroot: rdsetroot.c
+	@echo Compiling rdsetroot.c...
+	@cc -W -o rdsetroot rdsetroot.c -lelf

@@ -1,0 +1,82 @@
+#!/bin/sh
+
+# Basic script to start an OpenBSD installation
+# on the given VPS and local bsd.rd, assuming a default
+# OVH debian installation on the VPS to begin with.
+
+set -e
+
+# Default user
+user=debian
+root='hd0,gpt1'
+
+if [ -z "$2" ]; then
+	echo `basename $0 .sh` '<vps-id> <bsd.rd> [grub-root-id]' 1>&2
+	exit 1
+fi
+
+if [ -n "$3" ]; then root="$3"; fi
+
+mkgrubcustom() {
+	cat <<EOF
+#!/bin/sh
+exec tail -n +3 \$0
+# This file provides an easy way to add custom menu entries.  Simply type the
+# menu entries you want to add after this comment.  Be careful not to change
+# the 'exec tail' line above.
+menuentry "OpenBSD" {
+  set root=($root)
+  kopenbsd /bsd.rd
+}
+EOF
+}
+
+mkgrubdefault() {
+	cat <<'EOF'
+# If you change this file, run 'update-grub' afterwards to update
+# /boot/grub/grub.cfg.
+# For full documentation of the options in this file, see:
+#   info -f grub -n 'Simple configuration'
+
+GRUB_DEFAULT=2
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR=`lsb_release -i -s 2> /dev/null || echo Debian`
+GRUB_CMDLINE_LINUX_DEFAULT=""
+GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200 earlyprintk=ttyS0,115200 consoleblank=0"
+GRUB_TERMINAL="console serial"
+GRUB_SERIAL_COMMAND="serial --speed=115200"
+
+GRUB_HIDDEN_TIMEOUT=10
+GRUB_HIDDEN_TIMEOUT_QUIET=false
+GRUB_TIMEOUT=10
+EOF
+}
+
+mkinstaller() {
+	cat <<EOF
+#!/bin/sh
+
+set -e
+
+cp /home/$user/etc-grub.d-40_custom /etc/grub.d/40_custom
+cp /home/$user/etc-default-grub     /etc/default/grub
+cp /home/$user/bsd.rd               /bsd.rd
+
+update-grub
+
+EOF
+}
+
+vps=$1
+bsd=$2
+
+scp $bsd            ${user}'@'$vps:/home/$user/bsd.rd
+mkgrubcustom  | ssh ${user}'@'$vps "cat > /home/$user/etc-grub.d-40_custom"
+mkgrubdefault | ssh ${user}'@'$vps "cat > /home/$user/etc-default-grub"
+mkinstaller   | ssh ${user}'@'$vps "cat > /home/$user/installer.sh"
+
+ssh ${user}'@'$vps 'sudo su -c "sh /home/'$user'/installer.sh"'
+
+# Make sure we exit with success, despite the broken link
+set +e; ssh ${user}'@'$vps 'sudo su -c "reboot"'; set -e
+exit 0

@@ -1,0 +1,115 @@
+#!/bin/sh
+
+# Wrapper to automatically install an OpenBSD
+
+set -e
+
+ovhdo=ovh-do
+mkbsdrd=mkbsdrd
+installopto=install-openbsd-to
+
+PATH=$PATH:`dirname $0`
+
+if ! which $ovhdo >/dev/null; then
+	echo $ovhdo not found in \$PATH 1>&2
+	exit 1
+fi
+
+if ! which $mkbsdrd >/dev/null; then
+	echo $mkbsdrd not found in \$PATH 1>&2
+	exit 1
+fi
+
+if ! which $installopto >/dev/null; then
+	echo $installopto not found in \$PATH 1>&2
+	exit 1
+fi
+
+# Log some data, prefix it with current script name.
+#
+# Input:
+#	$0 : script's name
+#	$* : data to log
+# Output:
+log() {
+	n=`basename $0`
+	printf "%-40s: %s\n" "$n" "$*"
+}
+
+ip=
+root=
+while getopts g:i: x; do
+	case "$x" in
+		g) root="$OPTARG" ;;
+		i) ip="$OPTARG" ;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+if [ -z "$2" ]; then
+	echo `basename $0`: '[-g grub-root-id] [-i vps-ip] <vps-id> [mkbsdrd-opts]' 1>&2
+	exit 1
+fi
+
+vps="$1";    shift
+opts="$@"
+
+if [ -z "$ip" ]; then
+	# Meh; perhaps we'd want something finer?
+	ip=`$ovhdo "$vps" ls-ips | sed 1q`
+	if [ -z "$ip" ]; then
+		echo "No IP associated to the VPS?" 1>&2
+		exit 1
+	fi
+fi
+
+bsdrd=/tmp/bsd.rd.$$
+
+log "Current KVM console link..."
+$ovhdo "$vps" get-console
+
+# Reset the VPS to a stock debian; clean our known_hosts
+# so we can automatically SSH to it
+log "Resetting to a stock debian..."
+$ovhdo "$vps" setup-debian
+
+log "Resetting known_hosts entries for $ip..."
+# Wait a little for the debian to be reachable.
+sleep 5
+ssh-keygen  -R "$ip" > /dev/null 2>/dev/null
+ssh-keyscan -H "$ip" >> $HOME/.ssh/known_hosts 2>/dev/null
+
+log "Current KVM console link..."
+$ovhdo "$vps" get-console
+
+log "Building a bsd.rd..."
+$mkbsdrd $opts $bsdrd
+
+# Install an OpenBSD; again, clearing the known_hosts
+# thereafter so we can ssh(1) from it without warning after.
+log "Installing OpenBSD with $bsdrd..."
+$installopto "$ip" $bsdrd
+
+# Ensure password-less ssh(1) connection to root user
+# has been properly setup.
+#
+# Keep in mind that the first boot can be slow
+log "Pooling for root@$ip ssh link..."
+for x in `seq 1 60`; do
+	sleep 5
+	log "Retrying..."
+
+	if nc -vz $ip 22 2>/dev/null; then
+		log "Resetting known_hosts entries for $ip..."
+		ssh-keygen  -R "$ip" > /dev/null 2>/dev/null
+		ssh-keyscan -H "$ip" >> $HOME/.ssh/known_hosts 2>/dev/null
+		if ssh 'root@'$ip 'echo hello, world; uname -a'; then
+			rm $bsdrd
+			exit 0
+		fi
+	fi
+done
+
+log "Giving up; look at the KVM console"
+$ovhdo "$vps" get-console
+exit 1
