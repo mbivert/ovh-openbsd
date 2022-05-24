@@ -1,0 +1,70 @@
+#!/bin/sh
+
+set -e
+
+sp=/tmp/switchport.$$
+
+cat <<'EOF2' > $sp
+#!/bin/sh
+
+set -e
+
+port=35410
+conf=/etc/ssh/sshd_config
+
+if [ -n "$1" ]; then port="$1"; fi
+if [ -n "$2" ]; then conf="$2"; fi
+
+sed -i /^Port/d $conf
+
+cat <<EOF| ed $conf > /dev/null 2>/dev/null
+/^#Port 22
+a
+Port 22
+Port $port
+.
+wq
+EOF
+
+rcctl restart sshd >/dev/null
+EOF2
+
+user=root
+port=22
+
+# Input:
+#	$1 : exit code
+help() {
+	p=`basename $0`
+	cat <<EOF
+NAME
+	$p
+
+SYNOPSYS
+	$p [-h]
+	$p [-u user] [-p port] <m> [newport] [path/to/sshd_config]
+
+DESCRIPTION
+	Update sshd(8) listening port of m (assumed to be an OpenBSD)
+
+	  user       \$user   SSH user                 (default: $user)
+	  port       \$port   Current SSH port to use  (default: $port)
+
+EOF
+	exit $1
+}
+
+if [ "$1" = "-h" ] && [ "$2" = "" ]; then help 0; fi
+
+while getopts u:p: x; do
+	case "$x" in
+		u) user="$OPTARG" ;;
+		p) port="$OPTARG"    ;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+if [ -z "$1" ]; then help 1; fi
+m=$1; shift
+
+cat $sp | ssh -p $port $user'@'$m "cat > /root/switchport; sh /root/switchport $@"

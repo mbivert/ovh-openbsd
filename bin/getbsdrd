@@ -1,0 +1,109 @@
+#!/bin/sh
+
+set -e
+
+tmpd=/tmp/getbsdrd/
+mkdir -p $tmpd
+
+# NOTE: we're not using /tmp/ so that we can run
+#
+#	getbsdrd > /tmp/bsd.rd
+#
+# Current solution is not perfect, but using /tmp/ is a
+# likely use-case.
+#
+# For more, look at get() below and consider the following:
+#	#!/bin/sh
+#
+#	f() {
+#		x=/tmp/wat
+#		echo foo > $x
+#
+#		mv $x $x.$$
+#		echo $x.$$
+#	}
+#
+#	y=`f`
+#	cat $y
+#	% sh t.sh > /tmp/wat
+#	cat: /tmp/wat.3861193: input file is output file
+
+
+# Default; there does not seem to be a latest link.
+version=7.1
+arch=amd64
+mirror=https://cdn.openbsd.org
+mpath=pub/OpenBSD
+
+# Dependencies
+if ! which curl      >/dev/null; then exit 1; fi
+if ! which sha256sum >/dev/null; then exit 1; fi
+
+# Input:
+#	$1 : exit code
+help() {
+	p=`basename $0`
+	cat <<EOF
+NAME
+	$p
+
+SYNOPSYS
+	$p [-h]
+	$p [-v version] [-a arch] [-m mirror] [-p mpath] [path/to/bsd.rd]
+
+DESCRIPTION
+	$p downloads an OpenBSD bsd.rd, where:
+
+	  version       \$version   OpenBSD version      (default: $version)
+	  arch          \$arch      Architecture to use  (default: $arch)
+	  mirror        \$mirror    OpenBSD mirror       (default: $mirror)
+	  mpath         \$mirror    Mirror path          (default: $mpath)
+
+	If no bsd.rd output path is specified, resulting bsd.rd is sent
+	to stdout.
+
+EOF
+	exit $1
+}
+
+# Print localtion of downloaded bsd.rd file
+get() {
+	# Keep it named "bsd.rd" for sha256sum(1)
+	fn=$tmpd/bsd.rd
+	cs=$tmpd/SHA256
+
+	# Mirrors are sensitive to double-/
+	url=`echo $mirror/$mpath/$version/$arch/ | sed 's,//*,/,g'`
+
+	curl -s "${url}bsd.rd"                  > $fn
+	curl -s "${url}SHA256" | grep 'bsd\.rd' > $cs
+
+	cd $tmpd; sha256sum -c $cs >/dev/null; cd - >/dev/null
+
+	# Use temporary unique name
+	mv $fn $fn.$$
+	echo $fn.$$
+
+	rm $cs
+}
+
+if [ "$1" = "-h" ] && [ "$2" = "" ]; then help 0; fi
+
+while getopts v:a:m:p: x; do
+	case "$x" in
+		v) version="$OPTARG" ;;
+		a) arch="$OPTARG"    ;;
+		m) mirror="$OPTARG"  ;;
+		p) mpath="$OPTARG"   ;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+# Download; send to stdout if no output filename has been
+# specified
+fn=`get`
+if [ -z "$1" ]; then
+	cat $fn; rm $fn
+else
+	mv $fn "$1"
+fi

@@ -1,0 +1,12 @@
+System hostname = somewhere
+Password for root = *************
+Network interfaces = vio0
+Allow root ssh login = yes
+IPv4 address for vio0 = dhcp
+Public ssh key for root = ssh-ed25519 ... someone@somewhereelse
+Which disk is the root disk = sd0
+What timezone are you in = Europe/Paris
+Unable to connect using https. Use http instead = no
+Location of sets = http
+Server = ftp.spline.de
+Set name(s) = -all bsd* base* comp* man*

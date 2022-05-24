@@ -7,6 +7,7 @@ set -e
 ovhdo=ovh-do
 mkbsdrd=mkbsdrd
 installopto=install-openbsd-to
+switchport=switchport
 
 PATH=$PATH:`dirname $0`
 
@@ -17,6 +18,11 @@ fi
 
 if ! which $mkbsdrd >/dev/null; then
 	echo $mkbsdrd not found in \$PATH 1>&2
+	exit 1
+fi
+
+if ! which $switchport >/dev/null; then
+	echo $switchport not found in \$PATH 1>&2
 	exit 1
 fi
 
@@ -38,16 +44,18 @@ log() {
 
 ip=
 root=
-while getopts g:i: x; do
+port=
+while getopts g:i:p: x; do
 	case "$x" in
 		g) root="$OPTARG" ;;
-		i) ip="$OPTARG" ;;
+		i) ip="$OPTARG"   ;;
+		p) port="$OPTARG" ;;
 	esac
 done
 shift `expr $OPTIND - 1`
 
 if [ -z "$2" ]; then
-	echo `basename $0`: '[-g grub-root-id] [-i vps-ip] <vps-id> [mkbsdrd-opts]' 1>&2
+	echo `basename $0`: '[-g grub-root-id] [-i vps-ip] [-p port] <vps-id> [mkbsdrd-opts]' 1>&2
 	exit 1
 fi
 
@@ -105,6 +113,12 @@ for x in `seq 1 60`; do
 		ssh-keyscan -H "$ip" >> $HOME/.ssh/known_hosts 2>/dev/null
 		if ssh 'root@'$ip 'echo hello, world; uname -a'; then
 			rm $bsdrd
+
+			# Change sshd(8) port if a port has been specified
+			if [ -n "$port" ]; then
+				switchport "$ip" $port
+				ssh -p $port 'root@'$ip 'echo "sshd(8)" listening port updated with success'
+			fi
 			exit 0
 		fi
 	fi

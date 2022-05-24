@@ -1,0 +1,139 @@
+#!/bin/sh
+
+set -e
+
+# Default config
+install=./install.conf
+remote=
+rwd=/root/mkbsdrd/
+
+# Dependencies
+if ! which ssh >/dev/null; then exit 1; fi
+
+# Input:
+#	$1 : exit code
+help() {
+	p=`basename $0`
+	cat <<EOF
+NAME
+	$p
+
+SYNOPSYS
+	$p [-h]
+	$p [-i install.conf] [-r remote] [-w rwd] </path/to/bsd.rd>
+	   [path/to/output/bsd.rd]
+
+DESCRIPTION
+	$p augments a given OpenBSD bsd.rd with the given install.conf, where:
+
+	  install.conf  \$install   Path to install.conf (default: $install)
+	  remote        \$remote    Remote OpenBSD (ssh) (default: $remote)
+	  rwd           \$rwd       Remote work dir      (default: $rwd)
+
+	If no bsd.rd output path is specified, the input one is modified "in-place".
+
+SEE ALSO
+	autoinstall(8)
+
+EOF
+	exit $1
+}
+
+if [ "$1" = "-h" ] && [ "$2" = "" ]; then help 0; fi
+
+while getopts i:r:w: x; do
+	case "$x" in
+		i) install="$OPTARG" ;;
+		r) remote="$OPTARG"  ;;
+		w) rwd="$OPTARG"     ;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+# Input bsd.rd
+tbsd=$1; if [ -z "$1" ]; then tbsd="/dev/stdin"; fi
+
+# Output bsd.rd
+out=$2; if [ -z "$2" ]; then
+	# If unspecified, goes to stdout by default
+	out=/dev/stdout
+
+	# Unless a file has been specified as input bsd.rd,
+	# in which case, it'll be modified "in-place".
+	if [ ! -z "$1" ]; then
+		out=$1
+	fi
+fi
+
+if [ -z "$install" ] || [ ! -r "$install" ]; then
+	echo "No install.conf specified/unreadable file: $install" 1>&2
+	exit 1
+fi
+
+# Linux machine: quickly patched OpenBSD's rdsetroot.c compile;
+# but UFS writing is typically disabled because unstable.
+#
+# TODO: try to make it work when enabled
+if [ `uname` = "Linux" ]; then
+	if [ -z "$remote" ]; then
+		b="On Linux; no remote host specified"
+		if ! which rdsetroot >/dev/null 2>&1; then
+			echo "$b; rdsetroot not installed" >&2
+			exit 1
+		fi
+		if ! zgrep -q '^CONFIG_UFS_FS_WRITE' /proc/config.gz; then
+			echo "$b; UFS writing disabled" >&2
+			exit 1
+		fi
+		echo "TODO: Linux mount & adjust bsd.rd"
+		exit 2
+	fi
+fi
+
+# Create remote working directory; push bsd.rd,
+# install.conf and a script to add install.conf to
+# the bsd.rd
+ssh $remote "mkdir -p $rwd"
+cat $tbsd    | ssh $remote "gzip -d > $rwd/bsd.rd"
+cat $install | ssh $remote "cat     > $rwd/install.conf"
+
+# Remote script
+cat <<EOF    | ssh $remote "cat     > $rwd/setup.sh"
+#!/bin/sh
+
+set -e
+
+bsd=$rwd/bsd.rd
+install=/tmp/install.conf
+fs=$rwd/disk.fs
+vnd=vnd0
+mnt=/mnt/tmp
+
+rdsetroot -x \$bsd \$fs
+
+# Make sure we can safely use it
+if mount | grep -q \$vnd; then
+	echo error: \$vnd already in used >&2
+	exit 1
+fi
+
+if mount | grep -q \$mnt; then
+	echo error: \$mnt already in used >&2
+	exit 1
+fi
+
+vnconfig \$vnd \$fs
+mkdir -p \$mnt
+mount /dev/\${vnd}a \$mnt
+
+cp $rwd/install.conf \$mnt/auto_install.conf
+
+umount \$mnt
+vnconfig -u \$vnd
+rdsetroot \$bsd \$fs
+
+cat \$bsd
+
+EOF
+
+ssh $remote "sh $rwd/setup.sh" | gzip -f > $out

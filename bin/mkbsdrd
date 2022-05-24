@@ -4,19 +4,13 @@ set -e
 
 tmpd=/tmp
 
-# Default; there does not seem to be a latest link.
-version=7.0
-arch=amd64
-mirror=https://cdn.openbsd.org
-mpath=pub/OpenBSD
-install=./install.conf
-rwd=/root/mkbsdrd/
-remote=
-
 conf=
 
+PATH=$PATH:`dirname $0`
+
 # Dependencies
-if ! which curl >/dev/null; then exit 1; fi
+if ! which getbsdrd   >/dev/null; then exit 1; fi
+if ! which patchbsdrd >/dev/null; then exit 1; fi
 
 # Input:
 #	$1 : exit code
@@ -29,24 +23,18 @@ NAME
 SYNOPSYS
 	$p [-h]
 	$p [-v version ] [-a arch] [-m mirror] [-p mpath] [-i install.conf]
-	   [-r remote] [-c conf] [-w rwd] [path/to/bsd.rd]
+	   [-r remote] [-w rwd] [path/to/bsd.rd]
 
 DESCRIPTION
 	$p fetch and augment an OpenBSD bsd.rd with the given install.conf,
 	where:
 
-	  version       \$version   OpenBSD version      (default: $version)
-	  arch          \$arch      Architecture to use  (default: $arch)
-	  mirror        \$mirror    OpenBSD mirror       (default: $mirror)
-	  mpath         \$mirror    Mirror path          (default: $mpath)
-	  install.conf  \$install   Path to install.conf (default: $install)
-	  remote        \$remote    Remote OpenBSD (ssh) (default: $remote)
-	  rwd           \$rwd       Remote work dir      (default: $rwd)
+EOF
+	getbsdrd   -h | awk '/DESCRIPTION/{x=1} x && /^	  [a-z]+/'
+	patchbsdrd -h | awk '/DESCRIPTION/{x=1} x && /^	  [a-z]+/'
+cat <<EOF
 
-	-c allows to specifies a configuration file (shell script) that
-	is sourced, allowing to set/override all variables mentionned above.
-
-	If no bsd.rd output path is specified, resulting bsd.rd is printed
+	If no bsd.rd output path is specified, resulting bsd.rd is sent
 	to stdout.
 
 SEE ALSO
@@ -56,36 +44,17 @@ EOF
 	exit $1
 }
 
-# Print localtion of downloaded bsd.rd file
-fetch() {
-	fn=$tmpd/bsd.rd
-	cs=$tmpd/SHA256
-
-	# Mirrors are sensitive to double-/
-	url=`echo $mirror/$mpath/$version/$arch/ | sed 's,//*,/,g'`
-
-	curl -s "${url}bsd.rd"                  > $fn
-	curl -s "${url}SHA256" | grep 'bsd\.rd' > $cs
-
-	(cd $tmpd; sha256sum -c $cs) >/dev/null
-
-	mv $fn $fn.$$
-
-	echo $fn.$$
-}
-
 if [ "$1" = "-h" ] && [ "$2" = "" ]; then help 0; fi
 
 while getopts v:a:m:p:i:r:w:c: x; do
 	case "$x" in
-		v) version="$OPTARG" ;;
-		a) arch="$OPTARG"    ;;
-		m) mirror="$OPTARG"  ;;
-		p) mpath="$OPTARG"   ;;
-		i) install="$OPTARG" ;;
-		r) remote="$OPTARG"  ;;
-		w) rwd="$OPTARG"     ;;
-		c) conf="$OPTARG"    ;;
+		v) version="-v $OPTARG" ;;
+		a) arch="-a $OPTARG"    ;;
+		m) mirror="-m $OPTARG"  ;;
+		p) mpath="-p $OPTARG"   ;;
+		i) install="-i $OPTARG" ;;
+		r) remote="-r $OPTARG"  ;;
+		w) rwd="-w $OPTARG"     ;;
 	esac
 done
 shift `expr $OPTIND - 1`
@@ -93,82 +62,6 @@ shift `expr $OPTIND - 1`
 # Output bsd.rd to stdout by default.
 out=$1; if [ -z "$1" ]; then out=/dev/stdout; fi
 
-# Source configuration file if specified
-if [ -n "$conf" ]; then . $conf; fi
+getbsdrd $version $arch $mirror $mpath | \
+	patchbsdrd $install $remote $rwd > $out
 
-if [ -z "$install" ] || [ ! -r "$install" ]; then
-	echo "No install.conf specified/unreadable file: $install" 1>&2
-	exit 1
-fi
-
-# Linux machine: quickly patched OpenBSD's rdsetroot.c compile;
-# but UFS writing is typically disabled because unstable.
-#
-# TODO: try to make it work when enabled
-if [ `uname` = "Linux" ]; then
-	if [ -z "$remote" ]; then
-		b="On Linux; no remote host specified"
-		if ! which rdsetroot >/dev/null 2>&1; then
-			echo "$b; rdsetroot not installed" >&2
-			exit 1
-		fi
-		if ! zgrep -q '^CONFIG_UFS_FS_WRITE' /proc/config.gz; then
-			echo "$b; UFS writing disabled" >&2
-			exit 1
-		fi
-		echo "TODO: Linux mount & adjust bsd.rd"
-		exit 2
-	fi
-fi
-
-tbsd=`fetch`
-
-# Create remote working directory; push bsd.rd,
-# install.conf and a script to add install.conf to
-# the bsd.rd
-ssh $remote "mkdir -p $rwd"
-cat $tbsd    | ssh $remote "gzip -d > $rwd/bsd.rd"
-cat $install | ssh $remote "cat     > $rwd/install.conf"
-
-# Remote script
-cat <<EOF    | ssh $remote "cat     > $rwd/setup.sh"
-#!/bin/sh
-
-set -e
-
-bsd=$rwd/bsd.rd
-install=/tmp/install.conf
-fs=$rwd/disk.fs
-vnd=vnd0
-mnt=/mnt/tmp
-
-rdsetroot -x \$bsd \$fs
-
-# Make sure we can safely use it
-if mount | grep -q \$vnd; then
-	echo error: \$vnd already in used >&2
-	exit 1
-fi
-
-if mount | grep -q \$mnt; then
-	echo error: \$mnt already in used >&2
-	exit 1
-fi
-
-vnconfig \$vnd \$fs
-mkdir -p \$mnt
-mount /dev/\${vnd}a \$mnt
-
-cp $rwd/install.conf \$mnt/auto_install.conf
-
-umount \$mnt
-vnconfig -u \$vnd
-rdsetroot \$bsd \$fs
-
-cat \$bsd
-
-EOF
-
-ssh $remote "sh $rwd/setup.sh" | gzip -f > $out
-
-rm $tbsd
