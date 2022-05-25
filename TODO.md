@@ -12,7 +12,19 @@ by default.
 Given how little we tweak the file, it may be a better option
 than to rely on a remotely available OpenBSD...
 
-# patchbsdrd @input
+# @getbsd-signify
+We only check the SHA; we could also check the signature,
+eventually making it optional.
+
+# @full-auto-mkvm
+See if we can find a way to fully automatize the VM creation,
+
+# @multiple-vms-mkvm
+Shouldn't be too hard: just run the code on multiple VM configuration
+(ie. set of shell variables). A difficulty would be to interconnect
+them properly. Setting up a local mirror copy would now make more sense.
+
+# @patchbsdrd-input
 There's some weird behavior on patchbsdrd depending on how input
 bsd.rd is provided
 

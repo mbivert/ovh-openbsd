@@ -9,7 +9,7 @@ conf=
 PATH=$PATH:`dirname $0`
 
 # Dependencies
-if ! which getbsdrd   >/dev/null; then exit 1; fi
+if ! which getbsd     >/dev/null; then exit 1; fi
 if ! which patchbsdrd >/dev/null; then exit 1; fi
 
 # Input:
@@ -30,7 +30,7 @@ DESCRIPTION
 	where:
 
 EOF
-	getbsdrd   -h | awk '/DESCRIPTION/{x=1} x && /^	  [a-z]+/'
+	getbsd     -h | awk '/DESCRIPTION/{x=1} x && /^	  [a-z]+/'
 	patchbsdrd -h | awk '/DESCRIPTION/{x=1} x && /^	  [a-z]+/'
 cat <<EOF
 
@@ -62,6 +62,6 @@ shift `expr $OPTIND - 1`
 # Output bsd.rd to stdout by default.
 out=$1; if [ -z "$1" ]; then out=/dev/stdout; fi
 
-getbsdrd $version $arch $mirror $mpath | \
+getbsd bsd.rd $version $arch $mirror $mpath | \
 	patchbsdrd $install $remote $rwd > $out
 

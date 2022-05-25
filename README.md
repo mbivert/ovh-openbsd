@@ -33,25 +33,25 @@ Python wrapper to provide a partial access to the OVH API to other
     ovh-do <vps-id> <cmd=ls-imgs|get-console|ls-keys|ls-key|set-key|ls-ips|setup-debian> [key]
 
 ## bin/getbsdrd
-Download an OpenBSD ``bsd.rd``:
+Download OpenBSD files, e.g. ``bsd.rd``:
 
-	$ getbsdrd -h
+	$ getbsd -h
 	NAME
-		getbsdrd
+		getbsd
 
 	SYNOPSYS
-		getbsdrd [-h]
-		getbsdrd [-v version] [-a arch] [-m mirror] [-p mpath] [path/to/bsd.rd]
+		getbsd [-h]
+		getbsd [-v version] [-a arch] [-m mirror] [-p mpath] <file> [path/to/output]
 
 	DESCRIPTION
-		getbsdrd downloads an OpenBSD bsd.rd, where:
+		getbsd downloads an OpenBSD file (e.g. bsd.rd), where:
 
 		  version       $version   OpenBSD version      (default: 7.1)
 		  arch          $arch      Architecture to use  (default: amd64)
 		  mirror        $mirror    OpenBSD mirror       (default: https://cdn.openbsd.org)
 		  mpath         $mirror    Mirror path          (default: pub/OpenBSD)
 
-		If no bsd.rd output path is specified, resulting bsd.rd is sent
+		If no path/to/output is specified, resulting file is sent
 		to stdout.
 
 
@@ -79,7 +79,7 @@ Patch an existing OpenBSD ``bsd.rd`` to include a given ``install.conf``
 		autoinstall(8)
 
 ## bin/mkbsdrd
-Wraps both ``getbsdrd`` and ``patchbsdrd``: creates a ``bsd.rd`` embedding a
+Wraps both ``getbsd`` and ``patchbsdrd``: creates a ``bsd.rd`` embedding a
 specific ``install.conf`` file, using the remote OpenBSD to edit the default
 ``bsd.rd``. See also [upobsd][github-upobsd].
 
@@ -145,16 +145,21 @@ via ``ovh-do <vps-id> setup-debian``:
     install-openbsd-to <vps-id> <bsd.rd> [grub-root-id]
 
 ## bin/ovh-install-openbsd
-The main wrapper, that uses ``ovh-do``, ``mkbsdrd`` (hence ``getbsdrd``
+The main wrapper, that uses ``ovh-do``, ``mkbsdrd`` (hence ``getbsd``
 and ``patchbsdrd``), ``install-openbsd-to`` and ``switchport`` to perform
 the complete automatic installation.
 
     $ ovh-install-openbsd -h
     ovh-install-openbsd [-p port] [-g grub-root-id] [-i vps-ip] <vps-id> [mkbsdrd-opts]
 
+## bin/mkvm
+Nearly automatic VM install, see [skreutz.com/posts/autoinstall-openbsd-on-qemu/][skreutz-qemu]
+for more.
+
 [mb-openbsd-ovh]:     https://tales.mbivert.com/on-openbsd-ovh-vps-automatic-installation/
 [oman-8-autoinstall]: https://man.openbsd.org/autoinstall.8
 [oman-8-rdsetroot]:   https://man.openbsd.org/rdsetroot.8
 [gh-py-ovh-conf]:     https://github.com/ovh/python-ovh#configuration
+[skreutz-qemu]:       https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
 
 [github-upobsd]: https://github.com/semarie/upobsd/

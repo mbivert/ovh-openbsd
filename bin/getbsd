@@ -2,12 +2,12 @@
 
 set -e
 
-tmpd=/tmp/getbsdrd/
+tmpd=/tmp/getbsd/
 mkdir -p $tmpd
 
 # NOTE: we're not using /tmp/ so that we can run
 #
-#	getbsdrd > /tmp/bsd.rd
+#	getbsd bsd.rd > /tmp/bsd.rd
 #
 # Current solution is not perfect, but using /tmp/ is a
 # likely use-case.
@@ -35,9 +35,12 @@ arch=amd64
 mirror=https://cdn.openbsd.org
 mpath=pub/OpenBSD
 
+# OpenBSD base has a sha256(1), options aren't uniforms.
+sha256=sha256sum
+
 # Dependencies
-if ! which curl      >/dev/null; then exit 1; fi
-if ! which sha256sum >/dev/null; then exit 1; fi
+if ! which curl    >/dev/null; then exit 1; fi
+if ! which $sha256 >/dev/null; then exit 1; fi
 
 # Input:
 #	$1 : exit code
@@ -49,36 +52,41 @@ NAME
 
 SYNOPSYS
 	$p [-h]
-	$p [-v version] [-a arch] [-m mirror] [-p mpath] [path/to/bsd.rd]
+	$p [-v version] [-a arch] [-m mirror] [-p mpath] <file> [path/to/output]
 
 DESCRIPTION
-	$p downloads an OpenBSD bsd.rd, where:
+	$p downloads an OpenBSD file (e.g. bsd.rd), where:
 
 	  version       \$version   OpenBSD version      (default: $version)
 	  arch          \$arch      Architecture to use  (default: $arch)
 	  mirror        \$mirror    OpenBSD mirror       (default: $mirror)
 	  mpath         \$mirror    Mirror path          (default: $mpath)
 
-	If no bsd.rd output path is specified, resulting bsd.rd is sent
+	If no path/to/output is specified, resulting file is sent
 	to stdout.
 
 EOF
 	exit $1
 }
 
-# Print localtion of downloaded bsd.rd file
+# Print location of downloaded bsd.rd file
+#
+# Input:
+#	$1 : file to download
+# Output:
+#	Location of temporary local copy of downloaded file
 get() {
-	# Keep it named "bsd.rd" for sha256sum(1)
-	fn=$tmpd/bsd.rd
+	# Keep it named "bsd.rd" for checksum below
+	fn=$tmpd/$1
 	cs=$tmpd/SHA256
 
 	# Mirrors are sensitive to double-/
 	url=`echo $mirror/$mpath/$version/$arch/ | sed 's,//*,/,g'`
 
-	curl -s "${url}bsd.rd"                  > $fn
-	curl -s "${url}SHA256" | grep 'bsd\.rd' > $cs
+	curl -s "${url}$1"                    > $fn
+	curl -s "${url}SHA256" | grep -F "$1" > $cs
 
-	cd $tmpd; sha256sum -c $cs >/dev/null; cd - >/dev/null
+	cd $tmpd; $sha256 -c $cs >/dev/null; cd - >/dev/null
 
 	# Use temporary unique name
 	mv $fn $fn.$$
@@ -99,11 +107,15 @@ while getopts v:a:m:p: x; do
 done
 shift `expr $OPTIND - 1`
 
+if [ -z "$1" ]; then help 1; fi
+in="$1"; shift
+
 # Download; send to stdout if no output filename has been
 # specified
-fn=`get`
+fn=`get $in`
 if [ -z "$1" ]; then
 	cat $fn; rm $fn
 else
+	mkdir -p `dirname $1`
 	mv $fn "$1"
 fi

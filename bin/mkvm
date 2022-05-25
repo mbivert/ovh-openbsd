@@ -1,0 +1,179 @@
+#!/bin/sh
+
+# Mainly, an automatized version of:
+#
+#	https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
+#
+# Where:
+#
+# 1. We don't bother setting up a local OpenBSD mirror, and simply
+# rely of the host's network and the fact that qemu(1) by default properly
+# route Internet traffic between host and guest.
+#
+# 2. The installation process is almost 100% automatic: by default,
+# the instaler will look for the install.conf on
+#	http://10.0.2.2/install.conf (& al)
+#
+# But it's actually on:
+#	http://10.0.2.1/install.conf
+#
+# The issue is mentionned in the blog post. Theoretically, controlling
+# the DHCP lease could allow to control the actual server, see
+# autoinstall(8):
+#
+#	The URL used to fetch the file is constructed from dhcp-options(5)
+#	statements extracted from the DHCP lease file. next-server specifies
+#	the server. filename specifies the filename. The statement option
+#	host-name specifies the hostname which is also used as the default
+#	hostname during installation.
+#
+#	If filename is auto_install, then the URLs tried are, in order:
+#
+#		http://server/MAC_address-install.conf
+#		http://server/hostname-install.conf
+#		http://server/install.conf
+#
+# 3. By default disable root login and install an ed25519 or
+# the first public key found in $HOME/.ssh/.
+# ---------------------------------------------------------
+
+set -e
+
+# ./getbsd
+PATH=$PATH:.
+
+# General config
+
+# Hard drive directory
+vmsd=$HOME/vms/
+
+# For hard drive (re)creation/file redownload
+force=
+qemu="qemu-system-x86_64 -enable-kvm"
+
+# Trivial httpd to serve the install.conf
+httpdport=8085
+httpdd=/tmp/httpd/
+
+# Dependencies
+if ! which qemu-system-x86_64 >/dev/null; then exit 1; fi
+if ! which python3            >/dev/null; then exit 1; fi
+if ! which socat              >/dev/null; then exit 1; fi
+
+# ---------------------------------------------------------
+
+# VM config
+name=obsd
+hostname=$name
+diskfmt=qcow2
+diskname=$name.$diskfmt
+diskfile=$vmsd/$diskname
+# NOTE: bootfile name should trigger different behavior in
+# different scenarios; it seems it doesn't matter in our case,
+# but this needs to be confirmed. Default name is "pxeboot".
+bootfile=auto_install
+disksz=10G
+cpus=2
+ram=500M
+tftpd=/tmp/tftp/
+tz=Europe/Paris
+key=
+setserver=ftp.spline.de
+
+# ---------------------------------------------------------
+
+# (re)create hard drive
+mkdisk() {
+	if [ -n "$force" ] || [ ! -f "$diskfile" ]; then
+		qemu-img create -f $diskfmt $diskfile $disksz
+	fi
+}
+
+getsshkey() {
+	if [ -z "$key" ]; then
+		if [ -e $HOME/.ssh/id_ed25519.pub ]; then
+			key=`cat $HOME/.ssh/id_ed25519.pub`
+		else
+			# Pick first one if any
+			for x in $HOME/.ssh/*.pub; do
+				# Guard against bare "*.pub", aka none
+				if [ -f "$x" ]; then key=`cat $x`; fi
+				break
+			done
+		fi
+	fi
+
+	if [ -z "$key" ]; then echo 'No ssh key found' 1>&2; exit 1; fi
+
+	echo $key
+}
+
+# Create an install.conf
+mkinstallconf() {
+	key=`getsshkey`
+
+cat <<EOF
+System hostname = $hostname
+Password for root = *************
+Network interfaces = vio0
+Allow root ssh login = yes
+IPv4 address for vio0 = dhcp
+Public ssh key for root = $key
+Which disk is the root disk = sd0
+What timezone are you in = $tz
+Unable to connect using https. Use http instead = no
+Location of sets = http
+Server = $setserver
+Set name(s) = -all bsd* base* comp* man*
+EOF
+}
+
+# Setup/update TFTP directory
+mktftpd() {
+	mkdir  -p  $tftpd/etc
+
+	if [ -n "$force" ] || [ ! -f $tftpd/bsd.rd ]; then
+		getbsd bsd.rd   $tftpd/bsd.rd
+	fi
+	if [ -n "$force" ] || [ ! -f $tftpd/$bootfile ]; then
+		getbsd pxeboot  $tftpd/$bootfile
+	fi
+
+	cat <<EOF > $tftpd/etc/boot.conf
+stty com0 115200
+set tty com0
+boot tftp:/bsd.rd
+EOF
+
+}
+
+mkhttpd() {
+	mkdir -p $httpdd
+	mkinstallconf > $httpdd/install.conf
+	set +e; pid=`lsof -t -i :$httpdport`; set -e
+	if [ -n "$pid" ]; then kill $pid; fi
+	python3 \
+		-m http.server \
+		--directory $httpdd \
+		--bind 127.0.0.1 $httpdport &
+}
+
+# Because of default boot order, if nothing is install
+# on the hard drive, it will launch the install process,
+# and will otherwise boot from the installed disk.
+launch() {
+	# For details, see
+	#	https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
+	$qemu \
+		-smp "cpus=$cpus" \
+		-m   $ram         \
+		-drive "file=$diskfile,media=disk,if=virtio" \
+		-device e1000,netdev=n1                      \
+		-netdev "user,id=n1,hostname=$hostname,tftp-server-name=10.0.2.1,tftp=$tftpd,bootfile=$bootfile,hostfwd=tcp::2222-:22,guestfwd=tcp:10.0.2.1:80-cmd:socat STDIO TCP4:127.0.0.1:$httpdport" \
+		-nographic
+}
+
+mkdisk
+mktftpd
+mkhttpd
+launch
