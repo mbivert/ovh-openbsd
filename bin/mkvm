@@ -35,12 +35,59 @@
 #
 # 3. By default disable root login and install an ed25519 or
 # the first public key found in $HOME/.ssh/.
+#
+# 4. The qemu(1) instance can be wrapped in a network namespace,
+# thus providing the VM with a "real" IP, similar to what would
+# happen with bridged TUN/TAP interface, or actually use a bridged
+# TUN/TAP interface.
+#
 # ---------------------------------------------------------
 
 set -e
 
 # ./getbsd
 PATH=$PATH:.
+
+passwd=dummy
+
+# Input:
+#	$1 : exit code
+help() {
+	p=`basename $0`
+	cat <<EOF
+NAME
+	$p
+
+SYNOPSYS
+	$p [-h]
+	$p [-d vmsd] [-f] [-g] [-p password] [-x] [-t <tap-int>] [-n <ns>]
+
+DESCRIPTION
+	$p launch an OpenBSD vm.
+
+	-d will select the VMs hard drive directory (default: $vmsd)
+
+	-f will force the re-creation of the VM.
+
+	-g will enable the graphic mode.
+
+	-x will disable root password
+
+	-p will set root password (cleartext)
+
+	-t will inform qemu(1) to use the given TAP interface instead
+	of relying on the default user-mode networking.
+
+	-n will run qemu in the given network namespace;
+	this requires sudo(1) (\$USER ALL=(ALL) /bin/ip netns)
+
+SEE ALSO
+	https://github.com/mbivert/vnet/blob/master/mktap can be used
+	to create/tear down a bridged TUN/TAP interface.
+
+EOF
+	exit $1
+}
 
 # General config
 
@@ -49,7 +96,29 @@ vmsd=$HOME/vms/
 
 # For hard drive (re)creation/file redownload
 force=
+
+# Default
 qemu="qemu-system-x86_64 -enable-kvm"
+
+# Enable graphic mode
+graphic=
+if [ "$1" = "-h" ] && [ "$2" = "" ]; then help 0; fi
+
+while getopts d:fgp:xn:t: x; do
+	case "$x" in
+		d) vmsd="$OPTARG"                          ;;
+		f) force=1                                 ;;
+		g) graphic=1                               ;;
+		p) passwd="$OPTARG"                        ;;
+		x) passwd='*************'                  ;;
+		t) tap="$OPTARG"                           ;;
+		n) qemu="sudo ip netns exec $OPTARG $qemu" ;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+# Disable graphic unless counter-indicated
+if [ -z "$graphic" ]; then qemu="$qemu -nographic"; fi
 
 # Trivial httpd to serve the install.conf
 httpdport=8085
@@ -74,11 +143,16 @@ diskfile=$vmsd/$diskname
 bootfile=auto_install
 disksz=10G
 cpus=2
-ram=500M
+ram=200M
 tftpd=/tmp/tftp/
 tz=Europe/Paris
 key=
 setserver=ftp.spline.de
+# Hosts ports corresponding to the guest's :22/:80/:443
+sshp=2222
+httpp=12180
+httpsp=12443
+main_ipv4=10.0.2.15
 
 # ---------------------------------------------------------
 
@@ -114,7 +188,7 @@ mkinstallconf() {
 
 cat <<EOF
 System hostname = $hostname
-Password for root = *************
+Password for root = $passwd
 Network interfaces = vio0
 Allow root ssh login = yes
 IPv4 address for vio0 = dhcp
@@ -139,11 +213,17 @@ mktftpd() {
 		getbsd pxeboot  $tftpd/$bootfile
 	fi
 
-	cat <<EOF > $tftpd/etc/boot.conf
+	if [ -z "$graphic" ]; then
+		cat <<EOF > $tftpd/etc/boot.conf
 stty com0 115200
 set tty com0
 boot tftp:/bsd.rd
 EOF
+	else
+		cat <<EOF > $tftpd/etc/boot.conf
+boot tftp:/bsd.rd
+EOF
+	fi
 
 }
 
@@ -162,15 +242,25 @@ mkhttpd() {
 # on the hard drive, it will launch the install process,
 # and will otherwise boot from the installed disk.
 launch() {
-	# For details, see
-	#	https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
-	$qemu \
-		-smp "cpus=$cpus" \
-		-m   $ram         \
-		-drive "file=$diskfile,media=disk,if=virtio" \
-		-device e1000,netdev=n1                      \
-		-netdev "user,id=n1,hostname=$hostname,tftp-server-name=10.0.2.1,tftp=$tftpd,bootfile=$bootfile,hostfwd=tcp::2222-:22,guestfwd=tcp:10.0.2.1:80-cmd:socat STDIO TCP4:127.0.0.1:$httpdport" \
-		-nographic
+	qemu="$qemu -drive file=$diskfile,media=disk,if=virtio"
+	qemu="$qemu -smp cpus=$cpus -m $ram"
+
+	if [ -n "$tap" ]; then
+		$qemu \
+			-device e1000,netdev=mynet0,mac=52:55:00:d9:46:33 \
+			-netdev "tap,id=mynet0,ifname=tap0,script=no,downscript=no"
+	else
+		# tftp cannot be used with tap device ("Invalid parameter 'bootfile'"),
+		# so we still need this one to install the VM, at least for now
+		# (we may use dnsmasq and/or tftp at some point)
+		#
+		# For details, see
+		#	https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
+		$qemu \
+			-device e1000,netdev=n1                      \
+			-netdev "user,id=n1,hostname=$hostname,tftp-server-name=10.0.2.1,tftp=$tftpd,bootfile=$bootfile,hostfwd=tcp::$sshp-:22,hostfwd=tcp::$httpp-:80,hostfwd=tcp::$httpsp-:443,guestfwd=tcp:10.0.2.1:80-cmd:socat STDIO TCP4:127.0.0.1:$httpdport,dhcpstart=$main_ipv4"
+	fi
+
 }
 
 mkdisk
