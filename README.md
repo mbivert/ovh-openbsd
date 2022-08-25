@@ -15,7 +15,9 @@ Before starting, you'll need:
   see [autoinstall(8)][oman-8-autoinstall];
   - OVH API credentials to use the API: we rely on the
   [default mechanism][gh-py-ovh-conf] provided by the official
-  OVH API Python wrapper.
+  OVH API Python wrapper;
+  - [ovh-do][gh-mb-ovh-tools], a small script to automatize
+  OVH API access.
 
 The tools being rather sharp, it's advised to take the time
 to read the code and/or the [blog post][mb-openbsd-ovh].
@@ -24,13 +26,6 @@ to read the code and/or the [blog post][mb-openbsd-ovh].
 ## ./rdsetroot.c
 A quickly patched [rdsetroot(8)][oman-8-rdsetroot] to compile on Linux. So
 far unused. See ``TODO.md:/^#.*@ufs-write``.
-
-## bin/ovh-do
-Python wrapper to provide a partial access to the OVH API to other
-(shell) scripts.
-
-    $ ovh-do -h
-    ovh-do <vps-id> <cmd=ls-imgs|get-console|ls-keys|ls-key|set-key|ls-ips|setup-debian> [key]
 
 ## bin/getbsdrd
 Download OpenBSD files, e.g. ``bsd.rd``:
@@ -139,7 +134,7 @@ that the VPS has been:
 
 By default, the OpenBSD is set with a root of ``hd0,gpt1``; the bsd.rd
 is likely to have been created by ``mkbsdrd`` and the debian setup
-via ``ovh-do <vps-id> setup-debian``:
+via ``ovh-do rebuild-debian <vps-is>``:
 
     $ install-openbsd-to -h
     install-openbsd-to <vps-id> <bsd.rd> [grub-root-id]
@@ -163,3 +158,4 @@ for more.
 [skreutz-qemu]:       https://www.skreutz.com/posts/autoinstall-openbsd-on-qemu/
 
 [github-upobsd]: https://github.com/semarie/upobsd/
+[gh-mb-ovh-tools]: https://github.com/mbivert/ovh-tools

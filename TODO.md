@@ -28,7 +28,7 @@ them properly. Setting up a local mirror copy would now make more sense.
 There's some weird behavior on patchbsdrd depending on how input
 bsd.rd is provided
 
-The following fails on the remote gzip -d
+The following fails on the remote gzip -a
 
   cat $fn | patchbsdrd
 
@@ -37,38 +37,8 @@ But the following works:
   patchbsdrd < $fn
 
 And within patchbsdrd, using cat - or cat /dev/stdin seems to
-also alters the remove ``gzip -d`` success when input is provided
+also alters the remove ``gzip -a`` success when input is provided
 on stdin.
-
-# ovh-do: update key @ovhdo-ssh-key-update
-If a key "ovh-do-key" is already registered, and if the default
-key found in ``$HOME/.ssh/`` doesn't match its value, we'd want
-to update the OVH key.
-
-# ovh-do: credentials managements
-There are some routes (new? Api status is "ALPHA") allowing to list
-applications, credentials for applications, etc.
-
-Maybe we could find a way to leverage/simplify credential managements
-for use with ovh-do. Likely, for (re)bootstraping, we'll need to launch
-a browser. See:
-
-	GET /me/api/application
-		Returns a list of applicationId (integers)
-	DELETE /me/api/application/{applicationId}
-		Remove given application
-	GET /me/api/application/{applicationId}
-		Retrieves names, description, etc.
-	GET /me/api/credential
-		Has an applicationId parameters and a way to pre-filter results;
-		return a list of credentialId (integers)
-	DELETE /me/api/credential/{credentialId}
-	GET /me/api/credential/{credentialId}
-		To respectively delete/retrieve the corresponding credentials
-		details (last usage, etc.)
-	PUT /me/api/credential/{credentialId}
-		From the documentation, doesn't seem to allow updating usage
-		period.
 
 # More flexibility toward OVH's "stock" Debian @more-flexible-debian-dep
 E.g.:
@@ -84,7 +54,7 @@ to keep the same mechanism than ``ovh-do`` to retrieve the key.
 
 # Uniform/better logging @logging
 
-# Parallelizing setup-debian & mkbsdrd @parallel-setup
+# Parallelizing rebuild-debian & mkbsdrd @parallel-setup
 Both operations are performed sequentially but could be performed in
 parallel. This should slightly speed up the build.
 
@@ -92,5 +62,3 @@ parallel. This should slightly speed up the build.
 Perhaps an option to use skip building a bsd.rd would be useful,
 especially for tests purposes; we could use a checksum of the
 install.conf to see whether it should be rebuilt.
-
-# ovh-do waitfortask timeout @waitfortask-timeout

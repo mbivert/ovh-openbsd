@@ -13,6 +13,7 @@ PATH=$PATH:`dirname $0`
 
 if ! which $ovhdo >/dev/null; then
 	echo $ovhdo not found in \$PATH 1>&2
+	echo "See https://github.com/mbivert/ovh-tools' 1>&2
 	exit 1
 fi
 
@@ -64,7 +65,8 @@ opts="$@"
 
 if [ -z "$ip" ]; then
 	# Meh; perhaps we'd want something finer?
-	ip=`$ovhdo "$vps" ls-ips | sed 1q`
+	# TODO: make sure it's the IPv4 one
+	ip=`$ovhdo ls-ips "$vps" | sed 1q`
 	if [ -z "$ip" ]; then
 		echo "No IP associated to the VPS?" 1>&2
 		exit 1
@@ -74,21 +76,15 @@ fi
 bsdrd=/tmp/bsd.rd.$$
 
 log "Current KVM console link..."
-$ovhdo "$vps" get-console
+$ovhdo get-console "$vps"
 
 # Reset the VPS to a stock debian; clean our known_hosts
 # so we can automatically SSH to it
 log "Resetting to a stock debian..."
-$ovhdo "$vps" setup-debian
-
-log "Resetting known_hosts entries for $ip..."
-# Wait a little for the debian to be reachable.
-sleep 5
-ssh-keygen  -R "$ip" > /dev/null 2>/dev/null
-ssh-keyscan -H "$ip" >> $HOME/.ssh/known_hosts 2>/dev/null
+$ovhdo rebuild-debian "$vps"
 
 log "Current KVM console link..."
-$ovhdo "$vps" get-console
+$ovhdo get-console "$vps"
 
 log "Building a bsd.rd..."
 $mkbsdrd $opts $bsdrd
@@ -125,5 +121,5 @@ for x in `seq 1 60`; do
 done
 
 log "Giving up; look at the KVM console"
-$ovhdo "$vps" get-console
+$ovhdo get-console "$vps"
 exit 1
